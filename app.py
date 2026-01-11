@@ -117,7 +117,7 @@ with st.sidebar:
 
 
 # ---------------------------
-# DASHBOARD
+# DASHBOARD (MODIFICATA: Gestione Utenti Completa)
 # ---------------------------
 if sel == "DASHBOARD":
     st.markdown("### 📊 Dashboard")
@@ -127,14 +127,69 @@ if sel == "DASHBOARD":
             p["prezzo"] = p["prezzo"].fillna(0); p["fee_commerciale"] = p["fee_commerciale"].fillna(0)
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("FATTURATO", f"€ {p['prezzo'].sum():,.0f}"); c2.metric("FEE", f"€ {p['fee_commerciale'].sum():,.0f}"); c3.metric("SPESE", f"€ {s:,.0f}"); c4.metric("UTILE", f"€ {(p['prezzo'].sum() - p['fee_commerciale'].sum() - s):,.0f}")
+        
         st.markdown("---")
-        with st.expander("👮 Gestione Utenti"):
-            c1, c2 = st.columns(2)
-            with c1:
+        
+        # --- NUOVA GESTIONE UTENTI (EDIT E DELETE) ---
+        with st.expander("👮 Gestione Utenti (Admin)"):
+            tab_new, tab_man = st.tabs(["➕ CREA NUOVO", "✏️ GESTISCI / ELIMINA"])
+            
+            # TAB 1: CREA NUOVO
+            with tab_new:
                 with st.form("nu"):
-                    un = st.text_input("Username"); pw = st.text_input("Password"); rl = st.selectbox("Ruolo", ["admin", "staff", "europastudio"])
-                    if st.form_submit_button("Crea"): conn.execute("INSERT INTO utenti VALUES (?,?,?)", (un, pw, rl)); conn.commit(); st.success("Ok")
-            with c2: st.dataframe(pd.read_sql_query("SELECT username, ruolo FROM utenti", conn), hide_index=True)
+                    c_a, c_b = st.columns(2)
+                    un = c_a.text_input("Username")
+                    pw = c_b.text_input("Password")
+                    rl = st.selectbox("Ruolo", ["admin", "staff", "europastudio"])
+                    if st.form_submit_button("Crea Utente"):
+                        try:
+                            conn.execute("INSERT INTO utenti VALUES (?,?,?)", (un, pw, rl))
+                            conn.commit()
+                            st.success(f"Utente {un} creato!")
+                            time.sleep(1)
+                            st.rerun()
+                        except Exception as e:
+                            st.error("Errore: Utente già esistente o dati non validi.")
+
+            # TAB 2: GESTISCI ESISTENTI
+            with tab_man:
+                users_df = pd.read_sql_query("SELECT * FROM utenti", conn)
+                if not users_df.empty:
+                    for index, user in users_df.iterrows():
+                        u_orig = user['username']
+                        with st.expander(f"👤 {u_orig} ({user['ruolo']})"):
+                            with st.form(f"edit_user_{u_orig}"):
+                                c1, c2, c3 = st.columns(3)
+                                new_u = c1.text_input("Username", value=user['username'])
+                                new_p = c2.text_input("Password", value=user['password'])
+                                r_idx = ["admin", "staff", "europastudio"].index(user['ruolo']) if user['ruolo'] in ["admin", "staff", "europastudio"] else 0
+                                new_r = c3.selectbox("Ruolo", ["admin", "staff", "europastudio"], index=r_idx)
+                                
+                                c_save, c_del = st.columns([1, 0.2])
+                                with c_save:
+                                    if st.form_submit_button("💾 Salva Modifiche"):
+                                        try:
+                                            conn.execute("UPDATE utenti SET username=?, password=?, ruolo=? WHERE username=?", (new_u, new_p, new_r, u_orig))
+                                            conn.commit()
+                                            st.success("Modifiche salvate!")
+                                            time.sleep(0.5)
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Errore aggiornamento: {e}")
+                                
+                                with c_del:
+                                    if st.form_submit_button("🗑️ Elimina"):
+                                        if u_orig == st.session_state["username"]:
+                                            st.error("Non puoi eliminarti da solo!")
+                                        else:
+                                            conn.execute("DELETE FROM utenti WHERE username=?", (u_orig,))
+                                            conn.commit()
+                                            st.warning(f"Utente {u_orig} eliminato.")
+                                            time.sleep(0.5)
+                                            st.rerun()
+                else:
+                    st.info("Nessun utente trovato.")
+        
         conn.close()
     else: st.info("Area riservata.")
 
