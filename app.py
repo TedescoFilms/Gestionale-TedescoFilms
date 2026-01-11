@@ -236,6 +236,7 @@ elif sel == "PROGETTI":
                 """, unsafe_allow_html=True)
                 
                 if st.session_state["role"] in ["admin", "europastudio"]:
+                    # --- VISTA ADMIN E EUROPASTUDIO ---
                     c1, c2, c3, c4 = st.columns(4)
                     curr = pr["stato"] or "Preventivo"; poss = ["Preventivo", "Produzione", "Consegnato", "Pagato"]
                     
@@ -267,8 +268,13 @@ elif sel == "PROGETTI":
                                     sd = st.selectbox("Elimina", list(d_m.keys()), key=f"del_box_{pid}")
                                     if st.button("Conferma", key=f"btn_del_{pid}"): conn.execute("DELETE FROM spese_progetto WHERE id=?", (d_m[sd],)); conn.execute("DELETE FROM spese_progetto WHERE id=?", (d_m[sd],)); conn.commit(); st.rerun()
                 else:
-                    tabs = st.tabs(["📝 NOTE", "🎬 ODG", "🎥 RENT", "🛠 EQUIP", "⛔ COSTI", "📄 PDF"]); t_n, t_o, t_r, t_e, t_c, t_p = tabs; t_c.error("No access")
+                    # --- VISTA STAFF (CORRETTA) ---
+                    # Ora includiamo anche REGIA nei tabs dello staff
+                    tabs = st.tabs(["📝 NOTE", "🎬 ODG", "🎥 REGIA", "🎥 RENT", "🛠 EQUIP", "⛔ COSTI", "📄 PDF"])
+                    t_n, t_o, t_regia, t_r, t_e, t_c, t_p = tabs
+                    t_c.error("No access to costs")
                 
+                # --- CONTENUTI COMUNI A TUTTI I RUOLI (Note, ODG, Regia, Equip) ---
                 dett = pd.read_sql_query("SELECT * FROM dettagli_produzione WHERE project_id=?", conn, params=(pid,))
                 if dett.empty: conn.execute("INSERT INTO dettagli_produzione (project_id, note_regia, organizzazione, lista_attrezzatura, regia_video) VALUES (?, '', '', '', '')", (pid,)); conn.commit(); dett = pd.read_sql_query("SELECT * FROM dettagli_produzione WHERE project_id=?", conn, params=(pid,))
                 row = dett.iloc[0]
@@ -289,8 +295,8 @@ elif sel == "PROGETTI":
                     eq = st.text_area("Equip", value=row['lista_attrezzatura'], height=400, key=f"txt_eq_{pid}")
                     if st.button("Salva Equip", key=f"btn_eq_{pid}"): conn.execute("UPDATE dettagli_produzione SET lista_attrezzatura=? WHERE project_id=?", (eq, pid)); conn.commit(); st.toast("Saved")
                 
+                # --- SEZIONE ADMIN ONLY: PAGAMENTI E PDF RICEVUTA ---
                 if st.session_state["role"] in ["admin", "europastudio"]:
-                    # SEZIONE PAGAMENTI (RICEVUTA)
                     with t_pay:
                         st.subheader("Gestione Incasso")
                         met = st.radio("Metodo", ["Bonifico Bancario", "PayPal", "Contanti"], horizontal=True, key=f"pay_m_{pid}")
@@ -372,67 +378,69 @@ elif sel == "PROGETTI":
                             except Exception as e:
                                 st.error(f"❌ Errore PDF: {str(e)}")
 
-                    # SEZIONE SCHEDA TECNICA (RIPRISTINATA)
-                    with t_p:
-                        st.markdown("#### 📄 Scheda Progetto (Call Sheet)")
-                        if st.button("SCARICA SCHEDA TECNICA", key=f"btn_cs_{pid}"):
-                            try:
-                                from reportlab.lib.pagesizes import A4
-                                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-                                from reportlab.lib.styles import getSampleStyleSheet
-                                from reportlab.lib import colors
-                                from reportlab.lib.units import cm
-                                bf = BytesIO()
-                                doc = SimpleDocTemplate(bf, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
-                                story = []
-                                sty = getSampleStyleSheet()
-                                
-                                # Header
-                                if os.path.exists(lp):
-                                    im = RLImage(lp, width=4*cm, height=1.5*cm)
-                                    im.hAlign = 'LEFT'
-                                    story.append(im)
-                                    story.append(Spacer(1, 10))
-                                
-                                story.append(Paragraph(f"<b>SCHEDA PROGETTO: {pr['nome_progetto']}</b>", sty['Heading1']))
-                                story.append(Paragraph(f"Data Set: {data_ita} | Categoria: {pr['categoria_progetto']}", sty['Normal']))
-                                story.append(Spacer(1, 20))
-                                
-                                # ODG
-                                story.append(Paragraph("<b>ORDINE DEL GIORNO (ODG)</b>", sty['Heading3']))
-                                odg_txt = row['organizzazione'] if row['organizzazione'] else "Nessun dettaglio inserito."
-                                story.append(Paragraph(odg_txt.replace('\n', '<br/>'), sty['Normal']))
-                                story.append(Spacer(1, 20))
+                    # DELETE BUTTON
+                    if st.session_state["role"] == "admin":
+                        st.markdown("---")
+                        with st.expander("🗑️ DELETE PROJECT"):
+                            if st.button("CONFIRM DELETE", key=f"del_{pid}"):
+                                conn.execute("DELETE FROM progetti WHERE id=?", (pid,)); conn.execute("DELETE FROM spese_progetto WHERE project_id=?", (pid,)); conn.execute("DELETE FROM dettagli_produzione WHERE project_id=?", (pid,)); conn.commit(); st.rerun()
 
-                                # NOTE REGIA
-                                story.append(Paragraph("<b>NOTE DI REGIA / GENERALI</b>", sty['Heading3']))
-                                note_txt = row['note_regia'] if row['note_regia'] else "-"
-                                story.append(Paragraph(note_txt.replace('\n', '<br/>'), sty['Normal']))
-                                story.append(Spacer(1, 20))
+                # --- SEZIONE COMUNE: PDF SCHEDA TECNICA ---
+                with t_p:
+                    st.markdown("#### 📄 Scheda Progetto (Call Sheet)")
+                    if st.button("SCARICA SCHEDA TECNICA", key=f"btn_cs_{pid}"):
+                        try:
+                            from reportlab.lib.pagesizes import A4
+                            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage, PageBreak
+                            from reportlab.lib.styles import getSampleStyleSheet
+                            from reportlab.lib import colors
+                            from reportlab.lib.units import cm
+                            bf = BytesIO()
+                            doc = SimpleDocTemplate(bf, pagesize=A4, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+                            story = []
+                            sty = getSampleStyleSheet()
+                            
+                            # Header
+                            if os.path.exists(lp):
+                                im = RLImage(lp, width=4*cm, height=1.5*cm)
+                                im.hAlign = 'LEFT'
+                                story.append(im)
+                                story.append(Spacer(1, 10))
+                            
+                            story.append(Paragraph(f"<b>SCHEDA PROGETTO: {pr['nome_progetto']}</b>", sty['Heading1']))
+                            story.append(Paragraph(f"Data Set: {data_ita} | Categoria: {pr['categoria_progetto']}", sty['Normal']))
+                            story.append(Spacer(1, 20))
+                            
+                            # ODG
+                            story.append(Paragraph("<b>ORDINE DEL GIORNO (ODG)</b>", sty['Heading3']))
+                            odg_txt = row['organizzazione'] if row['organizzazione'] else "Nessun dettaglio inserito."
+                            story.append(Paragraph(odg_txt.replace('\n', '<br/>'), sty['Normal']))
+                            story.append(Spacer(1, 20))
 
-                                # EQUIPMENT
-                                story.append(Paragraph("<b>LISTA ATTREZZATURA</b>", sty['Heading3']))
-                                eq_txt = row['lista_attrezzatura'] if row['lista_attrezzatura'] else "-"
-                                story.append(Paragraph(eq_txt.replace('\n', '<br/>'), sty['Normal']))
-                                
-                                doc.build(story)
-                                bf.seek(0)
-                                st.download_button(
-                                    "Download Scheda Tecnica",
-                                    data=bf.getvalue(),
-                                    file_name=f"Scheda_{pr['nome_progetto'].replace(' ', '_')}.pdf",
-                                    mime="application/pdf",
-                                    key=f"dl_cs_{pid}"
-                                )
-                                st.success("✅ Scheda generata!")
-                            except Exception as e:
-                                st.error(f"❌ Errore PDF: {str(e)}")
+                            # NOTE REGIA
+                            story.append(Paragraph("<b>NOTE DI REGIA / GENERALI</b>", sty['Heading3']))
+                            note_txt = row['note_regia'] if row['note_regia'] else "-"
+                            story.append(Paragraph(note_txt.replace('\n', '<br/>'), sty['Normal']))
+                            story.append(Spacer(1, 20))
 
-                if st.session_state["role"] == "admin":
-                    st.markdown("---")
-                    with st.expander("🗑️ DELETE PROJECT"):
-                        if st.button("CONFIRM DELETE", key=f"del_{pid}"):
-                            conn.execute("DELETE FROM progetti WHERE id=?", (pid,)); conn.execute("DELETE FROM spese_progetto WHERE project_id=?", (pid,)); conn.execute("DELETE FROM dettagli_produzione WHERE project_id=?", (pid,)); conn.commit(); st.rerun()
+                            # EQUIPMENT
+                            story.append(Paragraph("<b>LISTA ATTREZZATURA</b>", sty['Heading3']))
+                            eq_txt = row['lista_attrezzatura'] if row['lista_attrezzatura'] else "-"
+                            story.append(Paragraph(eq_txt.replace('\n', '<br/>'), sty['Normal']))
+                            
+                            doc.build(story)
+                            bf.seek(0)
+                            st.download_button(
+                                "Download Scheda Tecnica",
+                                data=bf.getvalue(),
+                                file_name=f"Scheda_{pr['nome_progetto'].replace(' ', '_')}.pdf",
+                                mime="application/pdf",
+                                key=f"dl_cs_{pid}"
+                            )
+                            st.success("✅ Scheda generata!")
+                        except Exception as e:
+                            st.error(f"❌ Errore PDF: {str(e)}")
+
     conn.close()
 
 
